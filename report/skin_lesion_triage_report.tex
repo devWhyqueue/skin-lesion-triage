@@ -1,0 +1,313 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{tabularx}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage[round,authoryear]{natbib}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric}
+
+\geometry{margin=1in}
+\captionsetup[table]{skip=7pt}
+\captionsetup[figure]{skip=6pt}
+\graphicspath{{../experiments/outputs/}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
+\title{Bayesian Decision and Uncertainty:\\Asymmetric Clinical Triage for Skin Lesions}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+
+\noindent Automated dermoscopic image analysis is often summarized by symmetric metrics such as accuracy or area under the receiver operating characteristic curve, yet melanoma triage is not a symmetric decision problem. Missing a melanoma is clinically more costly than referring a benign lesion for review. This report studies the binary melanoma-versus-benign task specified for HAM10000 and ISIC 2018 by comparing a classical HSV histogram Gaussian mixture model with an EfficientNet-B0 classifier using Monte Carlo Dropout. The central question is not only which model ranks lesions better, but how calibrated probabilities, asymmetric Bayesian loss, and epistemic uncertainty alter triage behavior. On the lesion-aware validation split used here, the Platt-calibrated deep model reaches an AUC of 0.858 compared with 0.754 for the HSV baseline, with a Brier score of 0.089 and validation ECE of 0.020. A theoretical 10:1 false-negative to false-positive loss ratio yields 90.8\% sensitivity and 61.9\% specificity, while a calibration-selected 98\% sensitivity operating point reaches 98.0\% validation sensitivity at 32.6\% specificity. Adding an MC Dropout triage zone auto-reassures 19.4\% of validation lesions with one false negative among auto-reassured cases. The results support a cautious triage interpretation: probabilities should be calibrated before asymmetric thresholds are applied, and high-uncertainty lesions should be routed to human review rather than treated as ordinary binary predictions.
+\end{abstract}
+
+\section{Introduction}
+
+Skin lesion triage is a useful setting for studying Bayesian decision theory because the statistical classification task and the clinical decision task are not identical. A classifier may assign high rank to most melanomas and therefore achieve a strong ROC curve, while still being unsafe at the threshold chosen for deployment. In melanoma screening, the error types are not exchangeable: a false positive can lead to anxiety, specialist review, or biopsy of a benign nevus, but a false negative can delay diagnosis of a potentially lethal malignancy. The assignment therefore asks how a classifier should behave when false negatives are much more costly than false positives, using HAM10000 dermoscopic images and the ISIC 2018 challenge context as the empirical setting.
+
+The motivation for this question is broader than the binary task itself. The ISIC challenges were designed to standardize evaluation in lesion segmentation, attribute detection, and disease classification, and the 2018 challenge emphasized both scale and generalization across acquisition sources \citep{codella2018skin}. HAM10000 was released to address a related bottleneck: public dermoscopy datasets had historically been small, diagnostically narrow, or difficult to access, whereas HAM10000 provides 10,015 images across common pigmented lesion diagnoses \citep{tschandl2018ham10000}. The dataset is nevertheless not a substitute for a prospective clinical trial. It contains repeated images of some lesions, class imbalance, and mixed ground-truth procedures, including histopathology, follow-up, expert consensus, and confocal microscopy \citep{tschandl2018ham10000}. These properties matter because the present task is explicitly about triage, calibration, and uncertainty rather than only image recognition.
+
+This report follows the task specification in three parts. First, a classical generative baseline extracts global HSV colour histograms and fits one Gaussian mixture model per class. This baseline is intentionally limited: it tests how much diagnostic signal is available in global colour distributions alone. Second, a modern discriminative model uses a frozen EfficientNet-B0 backbone with a trained binary classification head, followed by limited fine-tuning of the final feature blocks in the executed experiment. Third, both models are interpreted through Bayesian decision theory. A predicted melanoma probability is not used with a fixed threshold by default; instead, the decision threshold is derived from the false-negative and false-positive loss ratio. Because this rule is only meaningful when probabilities behave as probabilities, the analysis also reports Brier score, expected calibration error, and Monte Carlo Dropout uncertainty.
+
+The contribution of the report is therefore deliberately modest and methodological. It does not claim clinical readiness. It shows how the same validation predictions lead to different triage policies when the loss function changes, and why calibration and uncertainty are central to interpreting such policies.
+
+\section{Methods}
+
+The experiment reduces HAM10000 to a binary melanoma triage problem. Melanoma (\texttt{mel}) is the positive class. Melanocytic nevi (\texttt{nv}), benign keratosis-like lesions (\texttt{bkl}), dermatofibroma (\texttt{df}), and vascular lesions (\texttt{vasc}) are treated as benign negatives. Basal cell carcinoma and actinic keratoses are excluded, not because they are unimportant, but because assigning them to the benign class would make the decision rule clinically incoherent: a safe triage system should not be penalized for referring a non-melanoma malignancy or premalignant lesion.
+
+\begin{table}[htbp]
+\centering
+\caption{Binary task construction after excluding basal cell carcinoma and actinic keratoses.}
+\label{tab:dataset}
+\begin{tabular}{llrr}
+\toprule
+Diagnosis & Binary role & Count & Percentage \\
+\midrule
+\texttt{mel} & melanoma positive & 1,113 & 12.1\% \\
+\texttt{nv} & benign negative & 6,705 & 73.1\% \\
+\texttt{bkl} & benign negative & 1,099 & 12.0\% \\
+\texttt{df} & benign negative & 115 & 1.3\% \\
+\texttt{vasc} & benign negative & 142 & 1.5\% \\
+\midrule
+Total & analyzed images & 9,174 & 100.0\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The validation protocol is lesion-aware. HAM10000 includes a \texttt{lesion\_id} field because a single physical lesion may have multiple images. If such images are split independently, visually similar observations of the same lesion can appear in both training and validation, inflating performance. The analysis therefore uses grouped splitting so that each \texttt{lesion\_id} belongs to exactly one partition. The executed split contains 7,339 training images and 1,835 validation images; the melanoma prevalence is 11.7\% in training and 13.7\% in validation. A further grouped calibration subset is carved out of the training partition so calibration and threshold selection can be separated from final validation.
+
+The classical pipeline uses colour as a deliberately interpretable baseline. Each image is converted from RGB to HSV, and normalized histograms are extracted for hue, saturation, and value. The resulting vector, denoted by $\phi(x)$, is a compact summary of how colour is distributed in image $x$. It discards where colours occur, but preserves whether the lesion contains darker, redder, or more saturated regions.
+
+For each class, the baseline asks a simple density-estimation question: how likely would this colour histogram be if the lesion were benign, and how likely would it be if the lesion were melanoma? A Gaussian mixture model answers this by representing each class as a weighted sum of $K$ Gaussian components,
+\begin{equation}
+    p(\phi(x) \mid y=c) = \sum_{k=1}^{K} \pi_{ck}\mathcal{N}\left(\phi(x); \mu_{ck}, \Sigma_{ck}\right),
+\end{equation}
+where $c \in \{0,1\}$ indicates benign or melanoma, $\pi_{ck}$ is the mixture weight of component $k$, and $\mu_{ck}$ and $\Sigma_{ck}$ describe the mean and covariance of that component. In the implementation $K=5$, with diagonal covariance matrices for numerical stability.
+
+The two class likelihoods are then converted into a posterior probability by Bayes' rule. The numerator is the melanoma likelihood multiplied by the melanoma prior; the denominator normalizes this quantity against the corresponding benign likelihood:
+\begin{equation}
+    p(y=1 \mid x) =
+    \frac{p(\phi(x)\mid y=1)p(y=1)}
+    {p(\phi(x)\mid y=1)p(y=1)+p(\phi(x)\mid y=0)p(y=0)}.
+\end{equation}
+\noindent This model can exploit global colour differences, but it cannot represent local border irregularity, asymmetry, streaks, or pigment networks.
+
+The deep pipeline uses EfficientNet-B0 because it provides a compact ImageNet-pretrained convolutional feature extractor \citep{tan2019efficientnet}. Images are resized to $224 \times 224$, normalized with ImageNet statistics, and augmented with flips, modest rotation, and colour jitter during training. The classification head consists of dropout followed by a single logit. The logit $z_i$ is an unconstrained score; applying the sigmoid function $\sigma(z_i)$ maps it to a number between zero and one.
+
+The model is trained with unweighted binary cross-entropy. This loss rewards high probabilities for melanoma images and low probabilities for benign images:
+\begin{equation}
+    \mathcal{L} = -\frac{1}{N}\sum_{i=1}^{N}
+    \left[y_i\log\sigma(z_i)+(1-y_i)\log(1-\sigma(z_i))\right].
+\end{equation}
+Here $y_i=1$ for melanoma and $y_i=0$ for benign lesions. The unweighted form is deliberate. Class weights can help optimization under imbalance, but they also shift the logit intercept and make $\sigma(z)$ less clean as an estimate of the posterior probability. The executed run therefore applies clinical asymmetry at decision time, after calibration, rather than embedding it simultaneously in the training loss.
+
+Calibration is handled with Platt scaling on the held-out calibration partition. The purpose of this step is not to change the ranking of lesions, but to make the numerical probabilities better match observed frequencies. Platt scaling learns a slope and an intercept on top of the neural-network logit:
+\begin{equation}
+    \hat{p}(y=1\mid x) = \sigma(az+b).
+\end{equation}
+\noindent The slope $a$ adjusts the spread of the scores, while the intercept $b$ adjusts the base-rate shift. The intercept is particularly relevant when class imbalance or model bias shifts the predicted prevalence. Calibration quality is summarized with the Brier score,
+\begin{equation}
+    \mathrm{Brier} = \frac{1}{N}\sum_{i=1}^{N}\left(\hat{p}_i-y_i\right)^2,
+\end{equation}
+and expected calibration error (ECE). For $M$ probability bins $B_m$, ECE is
+\begin{equation}
+    \mathrm{ECE} = \sum_{m=1}^{M}\frac{|B_m|}{N}
+    \left|\mathrm{acc}(B_m)-\mathrm{conf}(B_m)\right|,
+\end{equation}
+where $\mathrm{acc}(B_m)$ is the empirical positive frequency and $\mathrm{conf}(B_m)$ is the mean predicted probability in the bin \citep{guo2017calibration}. ECE is easy to read but should be interpreted cautiously because it depends on binning and may hide local miscalibration near clinically important thresholds.
+
+The Bayesian decision rule compares the expected harm of two actions. If the model auto-reassures a lesion as benign, the possible harm is a missed melanoma, weighted by the calibrated melanoma probability $\hat{p}$. If the model refers a lesion, the possible harm is an unnecessary referral or biopsy, weighted by the benign probability $1-\hat{p}$. Thus predicting benign has expected loss $\hat{p}L_{FN}$, and referral has expected loss $(1-\hat{p})L_{FP}$. Referral is preferred when
+\begin{equation}
+    \hat{p}L_{FN} > (1-\hat{p})L_{FP},
+\end{equation}
+which yields the threshold
+\begin{equation}
+    \tau = \frac{L_{FP}}{L_{FP}+L_{FN}}.
+\end{equation}
+\noindent For a $10:1$ false-negative to false-positive cost ratio, $\tau=1/11 \approx 0.091$. The threshold is low because even a small calibrated probability of melanoma may justify referral when the cost of missing melanoma is high.
+
+Finally, Monte Carlo Dropout is used to estimate epistemic uncertainty. Dropout remains active during inference, so the same image is passed through several slightly different subnetworks. This produces $T=30$ stochastic probabilities $p_t$. Their average, $\bar{p}$, is the final probability used for thresholding. The variation across the $T$ values indicates how stable the model is for that image. Predictive entropy measures total uncertainty,
+\begin{equation}
+    H[\bar{p}] = -\bar{p}\log\bar{p}-(1-\bar{p})\log(1-\bar{p}),
+\end{equation}
+while mutual information estimates model disagreement:
+\begin{equation}
+    MI = H[\bar{p}] - \frac{1}{T}\sum_{t=1}^{T}H[p_t].
+\end{equation}
+
+\noindent High mutual information indicates that different dropout subnetworks disagree, a practical signal that the lesion should be treated as uncertain rather than automatically cleared.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+    node distance=1.05cm,
+    box/.style={draw, rounded corners, align=center, minimum width=2.8cm, minimum height=0.85cm, font=\small},
+    arrow/.style={-{Latex[length=2mm]}, thick}
+]
+\node[box] (data) {HAM10000\\lesion-aware split};
+\node[box, right=of data] (models) {HSV GMM\\EfficientNet-B0};
+\node[box, right=of models] (cal) {Probability\\calibration};
+\node[box, right=of cal] (decision) {Bayesian\\loss threshold};
+\node[box, below=of cal] (unc) {MC Dropout\\uncertainty};
+\node[box, right=of unc] (triage) {Refer, review,\\or auto-reassure};
+\draw[arrow] (data) -- (models);
+\draw[arrow] (models) -- (cal);
+\draw[arrow] (cal) -- (decision);
+\draw[arrow] (cal) -- (unc);
+\draw[arrow] (decision) -- (triage);
+\draw[arrow] (unc) -- (triage);
+\end{tikzpicture}
+\caption{Evaluation flow for the task. The image classifier estimates melanoma probability, calibration makes the probability usable for decision thresholds, and MC Dropout provides an uncertainty signal for lesions that should not be handled by a binary threshold alone.}
+\label{fig:workflow}
+\end{figure}
+
+
+\section{Results}
+
+The classical and deep pipelines first differ in ranking performance. The HSV GMM reaches an AUC of 0.754 on the validation subsample used for the baseline, whereas the EfficientNet-B0 MC Dropout predictive mean reaches an AUC of 0.858 after Platt calibration on the full validation split. The ROC curves in Figure~\ref{fig:roc} show that the deep model separates melanoma from benign lesions substantially better than global colour histograms, although the curve is still far from a clinically definitive diagnostic test.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.86\textwidth]{roc_curve_triage_calibrated.png}
+\caption{Receiver operating characteristic curves for the Platt-calibrated deep model and the HSV GMM baseline. The deep model has stronger ranking performance, but ROC AUC alone does not specify the triage operating point.}
+\label{fig:roc}
+\end{figure}
+
+The training trajectory supports the interpretation that the deep model learned useful discriminative structure. Validation AUC improved from 0.678 after the first head-training epoch to approximately 0.857 after fine-tuning. The calibrated validation Brier score was 0.089, and validation ECE was 0.020. These values indicate that the probabilities are suitable for decision-theoretic thresholding, especially in the low-probability region where asymmetric clinical thresholds operate.
+
+\begin{table}[htbp]
+\centering
+\caption{Model comparison on the validation run. The GMM result is computed on a validation subsample for speed; the EfficientNet result uses the full validation split after Platt calibration and MC Dropout averaging.}
+\label{tab:model-comparison}
+\begin{tabularx}{\textwidth}{Y Y c Y}
+\toprule
+Model & Main feature representation & AUC & Calibration notes \\
+\midrule
+HSV GMM & Global HSV histograms & 0.754 & Generative posterior from coarse global colour features \\
+EfficientNet-B0 + MC Dropout & Learned dermoscopic morphology & 0.858 & Platt-calibrated probabilities; Brier 0.089, ECE 0.020 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The calibration summary in Figure~\ref{fig:calibration} explains why the decision analysis cannot rely on AUC alone. The reliability diagram is close to the diagonal in the low and middle probability ranges, and the histogram shows that most benign lesions are assigned low melanoma probabilities after removing the class-weight intercept shift. The calibrated probability distribution is important operationally: the theoretical $10:1$ threshold refers fewer than half of validation lesions rather than collapsing into universal referral.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.9\textwidth]{calibration_probability_summary.png}
+\caption{Calibration and probability-distribution summary generated from the validation predictions. The left panel shows reliability by probability bin; the right panel shows the class-conditional probability distribution and the $10:1$ Bayesian threshold.}
+\label{fig:calibration}
+\end{figure}
+
+The central effect of asymmetric loss is visible in Table~\ref{tab:thresholds}. At the symmetric threshold of 0.5, specificity is high but sensitivity is only 21.9\%, which is clinically unacceptable for melanoma screening. Lowering the threshold according to a $10:1$ loss ratio raises sensitivity to 90.8\% and keeps specificity at 61.9\%, referring 45.3\% of validation lesions. A still more conservative $20:1$ threshold raises sensitivity to 96.8\% at the cost of a 58.6\% referral rate. The calibrated model therefore produces a more operationally plausible referral burden, but the theoretical $10:1$ threshold still misses 23 melanomas in this validation split.
+
+\begin{table}[htbp]
+\centering
+\caption{Validation triage metrics under theoretical Bayesian thresholds from asymmetric loss. Thresholds are applied to Platt-calibrated MC Dropout predictive means.}
+\label{tab:thresholds}
+\begin{tabular}{lrrrrrr}
+\toprule
+Cost ratio & Threshold & Sensitivity & Specificity & Precision & Referral & FN \\
+\midrule
+1:1  & 0.500 & 0.219 & 0.986 & 0.714 & 0.042 & 196 \\
+5:1  & 0.167 & 0.777 & 0.782 & 0.360 & 0.295 & 56 \\
+10:1 & 0.091 & 0.908 & 0.619 & 0.274 & 0.453 & 23 \\
+20:1 & 0.048 & 0.968 & 0.475 & 0.226 & 0.586 & 8 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Because a theoretical loss ratio does not automatically guarantee a target clinical sensitivity on finite data, the analysis also selects thresholds on the calibration split by requiring minimum sensitivity and then evaluates them once on validation. Table~\ref{tab:operating-points} shows that a calibration-selected threshold for at least 98\% sensitivity gives 98.0\% validation sensitivity, 32.6\% specificity, and five false negatives. Requiring at least 99\% sensitivity gives 99.6\% validation sensitivity and only one false negative, but refers 80.6\% of lesions. These operating points are more clinically interpretable than a single cost ratio because they state the achieved safety level directly.
+
+\begin{table}[htbp]
+\centering
+\caption{Sensitivity-constrained thresholds selected on the calibration split and evaluated on validation. Each row chooses the highest-specificity calibration threshold satisfying the target sensitivity.}
+\label{tab:operating-points}
+\begin{tabular}{lrrrrr}
+\toprule
+Target sensitivity & Threshold & Validation sensitivity & Specificity & Referral & FN \\
+\midrule
+0.95 & 0.047 & 0.968 & 0.473 & 0.587 & 8 \\
+0.98 & 0.024 & 0.980 & 0.326 & 0.716 & 5 \\
+0.99 & 0.014 & 0.996 & 0.224 & 0.806 & 1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Figure~\ref{fig:uncertainty} shows why a single threshold is still an incomplete triage rule. Mutual information increases in the ambiguous middle of the probability range, and the highest-uncertainty cases include melanoma examples that are not extreme high-probability predictions. A clinically cautious workflow should therefore avoid interpreting all below-threshold cases as equally safe.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.86\textwidth]{uncertainty_scatter_calibrated.png}
+\caption{MC Dropout mutual information versus predicted melanoma probability. The dashed vertical line marks the $10:1$ Bayesian threshold. Points with high mutual information indicate model disagreement and are better interpreted as manual-review cases than as ordinary confident predictions.}
+\label{fig:uncertainty}
+\end{figure}
+
+\section{Discussion and Conclusion}
+
+The experiment illustrates the distinction between discrimination, calibration, and decision-making. The deep model clearly discriminates better than the HSV GMM, which is expected because a global colour histogram discards spatial morphology. Yet better AUC does not by itself solve the clinical problem. The Bayesian rule asks a different question: given a calibrated probability and an explicit loss matrix, which action minimizes expected harm? With unweighted training and Platt calibration, the predicted probabilities become usable for this decision rule: ECE is 0.020, and the $10:1$ threshold produces a referral rate of 45.3\% rather than collapsing into universal referral.
+
+The calibrated $10:1$ operating point is therefore informative but not sufficient. It refers 45.3\% of lesions and reaches 90.8\% sensitivity, which may be too low for a screening-oriented melanoma triage system. The sensitivity-constrained thresholds give a clearer safety interpretation. If the system must maintain approximately 98\% sensitivity, the validation referral rate rises to 71.6\%; if it must approach 99\% sensitivity, the referral rate rises to 80.6\%. These values are operationally expensive, but they make the tradeoff explicit rather than hiding it behind accuracy or AUC.
+
+The uncertainty analysis suggests a practical compromise: triage should not be forced into a single binary action. A more clinically plausible policy has three zones. Lesions with low calibrated melanoma probability and low epistemic uncertainty can be auto-reassured. Lesions with high probability should be referred urgently. Lesions in between, or lesions with high MC Dropout mutual information, should be sent to manual review. In the validation run, this policy auto-reassures 19.4\% of lesions with one false negative among auto-reassured cases, while urgent referrals are much more enriched for melanoma than the broad low-threshold referral sets. This framing fits the assignment's uncertainty requirement more naturally than using MC Dropout only as a plot, because it gives uncertainty a decision role.
+
+The uncertainty-aware triage zone makes this practical. Using the calibration-selected 99\% sensitivity threshold as the low-risk cutoff and the 95th percentile calibration mutual information as an uncertainty cutoff, the model auto-reassures 356 validation lesions (19.4\%), sends 1,402 lesions (76.4\%) to manual review, and marks 77 lesions (4.2\%) as urgent referrals. There is one melanoma among the auto-reassured cases, corresponding to 99.6\% sensitivity after auto-reassurance, and the urgent-referral group has 71.4\% precision. This is a conservative workflow, but it gives MC Dropout a direct decision role.
+
+\begin{table}[htbp]
+\centering
+\caption{Three-zone triage policy using calibrated probability and MC Dropout mutual information. Low-risk auto-reassurance requires both low predicted melanoma probability and low epistemic uncertainty.}
+\label{tab:triage-zone}
+\begin{tabular}{lrr}
+\toprule
+Triage zone metric & Value & Count \\
+\midrule
+Auto-reassured lesions & 19.4\% & 356 \\
+Manual-review lesions & 76.4\% & 1,402 \\
+Urgent-referral lesions & 4.2\% & 77 \\
+False negatives among auto-reassured & -- & 1 \\
+Sensitivity after auto-reassurance & 99.6\% & -- \\
+Urgent-referral precision & 71.4\% & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+Several limitations remain. HAM10000 is a valuable benchmark, but it is retrospective, multi-source, and partly labeled through non-histopathological procedures \citep{tschandl2018ham10000}. The ISIC challenge literature also emphasizes that algorithms with similar benchmark scores can differ in their ability to generalize to external data \citep{codella2018skin}. The present experiment uses one lesion-aware split rather than repeated external validation, and the GMM baseline is deliberately simple. The calibration split is also drawn from the training partition rather than from an external cohort. The findings should therefore be interpreted as a controlled demonstration of Bayesian triage behavior rather than evidence for deployment.
+
+In summary, asymmetric melanoma triage cannot be reduced to maximizing accuracy. A classifier must rank lesions, produce calibrated probabilities, and expose uncertainty. Bayesian decision theory then makes the clinical tradeoff explicit: lowering the threshold can reduce false negatives, but the referral burden depends strongly on calibration and class separation. The safest interpretation of this experiment is therefore not that the model should autonomously diagnose melanoma, but that calibrated probability and MC Dropout uncertainty can structure a conservative referral, review, and auto-reassurance workflow.
+
+\newpage
+\appendix
+\section{Supporting Material}
+
+Figure~\ref{fig:training} shows the training trajectory that supports the reported deep-model result. The curve is placed in the appendix to keep the main Results section focused on evaluation behavior rather than training diagnostics.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.82\textwidth]{training_history.png}
+\caption{Training loss and validation AUC over the head-training and fine-tuning stages. Discriminative performance improves steadily before plateauing near AUC 0.858.}
+\label{fig:training}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.98\textwidth]{example_lesions_grid.png}
+\caption{Example validation lesions from HAM10000. The four panels pair the dermoscopic image with the model role, image identifier, diagnostic label, predicted melanoma probability, and MC Dropout mutual information.}
+\label{fig:example-lesions}
+\end{figure}
+
+Representative validation examples make the same point at the individual-observation level. Table~\ref{tab:examples} includes a very low-probability benign nevus, a high-probability melanoma, cases close to the $10:1$ threshold, and high-uncertainty manual-review examples. These examples are not selected as clinical case studies, since the local repository does not include the image pixels; they are included to make the numerical behavior of the triage rule concrete.
+
+\begin{table}[htbp]
+\centering
+\caption{Example validation predictions from the validation run. The $10:1$ threshold is 0.091, while the low-risk triage threshold selected for at least 99\% calibration sensitivity is 0.014.}
+\label{tab:examples}
+\begin{tabular}{lllrr}
+\toprule
+Image ID & Diagnosis & Role & $p(\mathrm{mel})$ & Mutual information \\
+\midrule
+ISIC\_0031870 & \texttt{nv} & low-risk benign & 0.0003 & 0.0002 \\
+ISIC\_0032892 & \texttt{mel} & urgent melanoma & 0.7904 & 0.0118 \\
+ISIC\_0034258 & \texttt{nv} & near $10:1$ threshold & 0.0909 & 0.0061 \\
+ISIC\_0032925 & \texttt{mel} & high uncertainty & 0.3944 & 0.0629 \\
+ISIC\_0025851 & \texttt{bkl} & high uncertainty & 0.3106 & 0.0474 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\newpage
+\bibliographystyle{plainnat}
+\bibliography{skin_lesion_triage_refs}
+
+\end{document}
