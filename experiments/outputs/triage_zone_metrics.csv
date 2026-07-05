@@ -1,2 +1,2 @@
 low_threshold,high_threshold,uncertainty_threshold,auto_reassured_rate,manual_review_rate,urgent_referral_rate,auto_reassured_count,manual_review_count,urgent_referral_count,false_negatives_auto_reassured,sensitivity_after_auto_reassurance,urgent_referral_precision
-0.014,0.5,0.023496165871620178,0.19400544959128066,0.7640326975476839,0.041961852861035424,356,1402,77,1,0.9960159362549801,0.7142857142857143
+0.014,0.5,0.023530269041657448,0.19400544959128066,0.7640326975476839,0.041961852861035424,356,1402,77,1,0.9960159362549801,0.7142857142857143
