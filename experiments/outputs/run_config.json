@@ -1,0 +1,58 @@
+{
+  "seed": 42,
+  "hsv_bins": 32,
+  "gmm_max_components_searched": 30,
+  "gmm_selected_k": {
+    "benign": 28,
+    "melanoma": 8
+  },
+  "gmm_fit_subsample_size": 2000,
+  "primary_cost_matrix": {
+    "fn_cost": 10,
+    "fp_cost": 1,
+    "tau": 0.09090909090909091
+  },
+  "cost_sweep_ratios": [
+    [
+      1,
+      1
+    ],
+    [
+      5,
+      1
+    ],
+    [
+      10,
+      1
+    ],
+    [
+      20,
+      1
+    ]
+  ],
+  "fine_tune_backbone": true,
+  "head_epochs": 6,
+  "fine_tune_epochs": 6,
+  "unfreeze_last_blocks": 2,
+  "mc_dropout_passes": 30,
+  "batch_size": 128,
+  "runtime_minutes": {
+    "head_training": 3.54,
+    "fine_tuning": 3.36,
+    "total_notebook_so_far": 10.98
+  },
+  "split_sizes": {
+    "fit": 4750,
+    "val": 1146,
+    "cal": 1418,
+    "test": 1860
+  },
+  "package_versions": {
+    "python": "3.12.12",
+    "torch": "2.10.0+cu128",
+    "sklearn": "1.6.1",
+    "opencv": "4.13.0",
+    "pandas": "2.3.3",
+    "numpy": "2.0.2"
+  }
+}

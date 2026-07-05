@@ -1,4 +1,0 @@
-target_sensitivity,selected_threshold,cal_sensitivity,cal_specificity,cal_precision,cal_referral_rate,cal_false_negatives,val_sensitivity,val_specificity,val_precision,val_referral_rate,val_false_negatives,val_false_positives
-0.95,0.0,1.0,0.0,0.13678474114441416,1.0,0,1.0,0.0,0.13678474114441416,1.0,0,1584
-0.98,0.0,1.0,0.0,0.13678474114441416,1.0,0,1.0,0.0,0.13678474114441416,1.0,0,1584
-0.99,0.0,1.0,0.0,0.13678474114441416,1.0,0,1.0,0.0,0.13678474114441416,1.0,0,1584
