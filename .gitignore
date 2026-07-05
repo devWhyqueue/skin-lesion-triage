@@ -19,10 +19,10 @@
 *.tmp
 
 # Python local environments and caches
-.venv/
 __pycache__/
 *.pyc
 
 # User
 .agents/
 .venv/
+.venv_win/
