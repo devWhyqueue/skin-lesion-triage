@@ -1,0 +1,8 @@
+metric,value
+gmm_auc_full_val,0.7664707332287014
+gmm_ece_full_val,0.1850354348247878
+deep_raw_ece,0.0342040040025269
+gmm_n_components_benign,29.0
+gmm_n_components_melanoma,9.0
+pct_melanoma_under_1pct_risk_gmm,0.5258964143426295
+pct_melanoma_under_1pct_risk_deep,0.00398406374501992
