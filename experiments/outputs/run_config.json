@@ -1,7 +1,13 @@
 {
+  "seeds": [
+    42,
+    1,
+    2
+  ],
   "seed": 42,
   "hsv_bins": 32,
-  "gmm_max_components_searched": 30,
+  "gmm_max_components_searched": 60,
+  "gmm_calibrated": true,
   "gmm_selected_k": {
     "benign": 28,
     "melanoma": 8
@@ -31,15 +37,16 @@
     ]
   ],
   "fine_tune_backbone": true,
-  "head_epochs": 6,
-  "fine_tune_epochs": 6,
+  "head_epochs": 30,
+  "fine_tune_epochs": 30,
   "unfreeze_last_blocks": 2,
+  "early_stop_patience": 5,
   "mc_dropout_passes": 30,
-  "batch_size": 128,
+  "batch_size": 256,
   "runtime_minutes": {
-    "head_training": 3.54,
-    "fine_tuning": 3.36,
-    "total_notebook_so_far": 10.98
+    "head_training": 8.47,
+    "fine_tuning": 8.15,
+    "total_notebook_so_far": 22.6
   },
   "split_sizes": {
     "fit": 4750,
