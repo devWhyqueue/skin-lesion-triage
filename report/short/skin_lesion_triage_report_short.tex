@@ -10,6 +10,8 @@
 \usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage[round,authoryear]{natbib}
+\usepackage{xcolor}
+\definecolor{headingcolor}{HTML}{3A3A40}
 
 \geometry{margin=0.75in}
 \captionsetup[table]{skip=3pt}
@@ -20,8 +22,8 @@
 \graphicspath{{../../experiments/outputs/}}
 \newcolumntype{Y}{>{\raggedright\arraybackslash}X}
 
-\title{Bayesian Decision and Uncertainty:\\Asymmetric Clinical Triage for Skin Lesions}
-\author{}
+\title{Bayesian Decision and Uncertainty:\\Asymmetric Clinical Triage for Skin Lesions\thanks{Code and experiments are available at \url{https://github.com/devWhyqueue/skin-lesion-triage}.}}
+\author{Yannik Queisler \and Furkan Akg\"un \and Malte Jonas Kriese}
 \date{}
 
 \begin{document}
@@ -114,6 +116,15 @@ Better ranking (AUC) does not by itself solve the clinical problem: the Bayesian
 Several limitations temper these conclusions. HAM10000 is retrospective, multi-source, and partly labelled without histopathology \citep{tschandl2018ham10000}, and similar benchmark scores can still correspond to different generalization behaviour on external data \citep{codella2018skin}. Our calibration and threshold-selection splits are internal to the same HAM10000 pool, and three random seeds quantify internal split variability but not external validity. The GMM baseline is deliberately simple and is only a check on how much signal colour alone provides. The results should be read as a controlled demonstration of Bayesian triage behaviour, not as evidence of clinical readiness.
 
 In summary, asymmetric melanoma triage cannot be reduced to maximizing accuracy or AUC. A usable system must rank lesions, produce calibrated probabilities, and expose epistemic uncertainty, so that an explicit cost ratio or sensitivity target can be translated into a referral policy with a known, quantified referral burden and false-negative rate.
+
+\appendix
+\makeatletter
+\renewcommand\@seccntformat[1]{\color{headingcolor}\csname the#1\endcsname\quad}
+\makeatother
+\section{\texorpdfstring{\color{headingcolor}Use of AI}{Use of AI}}
+\color{headingcolor}
+Generative AI tools were used throughout this project, including for coding, preparing this report, and creating the accompanying presentation. All content was reviewed and verified by the authors, who take full responsibility for it.
+\color{black}
 
 \bibliographystyle{plainnat}
 \bibliography{skin_lesion_triage_refs}
